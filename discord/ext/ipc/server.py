@@ -1,4 +1,5 @@
 import logging
+import traceback
 
 import aiohttp.web
 from discord.ext.ipc.errors import *
@@ -35,6 +36,7 @@ class IpcServerResponse:
         self.length = len(data)
 
         self.endpoint = data["endpoint"]
+        self._uuid = data["_uuid"]
 
         for key, value in data["data"].items():
             setattr(self, key, value)
@@ -122,6 +124,13 @@ class Server:
         self.endpoints = {**self.endpoints, **self.ROUTES}
 
         self.ROUTES = {}
+    
+    def getTraceback(self, error):
+        etype = type(error)
+        trace = error.__traceback__
+        lines = traceback.format_exception(etype, error, trace)
+        traceback_text = ''.join(lines)
+        return traceback_text
 
     async def handle_accept(self, request):
         """Handles websocket requests from the client process.
@@ -143,18 +152,31 @@ class Server:
 
             log.debug("IPC Server < %r", request)
             endpoint = request.get("endpoint")
-
             headers = request.get("headers")
+            _uuid = request.get('_uuid')
+
+            response = {
+                '_uuid': _uuid,
+                'error': None
+            }
 
             if not headers or headers.get("Authorization") != self.secret_key:
                 log.info("Received unauthorized request (Invalid or no token provided).")
-                print("Received unauthorized request (Invalid or no token provided).")
-                response = {"error": "Invalid or no token provided.", "code": 403}
+                response['success'] = False,
+                response['error'] = {
+                    'type': 'InvalidAuthorization',
+                    'traceback': 'Invalid or no token provided.',
+                    "code": 403
+                }
             else:
                 if not endpoint or endpoint not in self.endpoints:
                     log.info("Received invalid request (Invalid or no endpoint given).")
-                    print("Received invalid request (Invalid or no endpoint given).")
-                    response = {"error": "Invalid or no endpoint given.", "code": 400}
+                    response['success'] = False
+                    response['error'] = {
+                        'type': 'InvalidEndpoint',
+                        'traceback': 'Invalid or no endpoint given.',
+                        "code": 400
+                    }
                 else:
                     server_response = IpcServerResponse(request)
                     try:
@@ -172,30 +194,28 @@ class Server:
 
                     try:
                         ret = await self.endpoints[endpoint](*arguments)
-                        response = ret
+                        response['_uuid'] = _uuid
+                        response['success'] = True
+                        response['data'] = ret
+                        
                     except Exception as error:
                         log.error(
                             "Received error while executing %r with %r",
                             endpoint,
                             request,
                         )
-                        print(
-                            "Received error while executing %r with %r",
-                            endpoint,
-                            request,
-                        )
                         self.bot.dispatch("ipc_error", endpoint, error)
 
-                        response = {
-                            "error": "IPC route raised error of type {}".format(
-                                type(error).__name__
-                            ),
-                            "code": 500,
+                        response['success'] = False
+                        response['error'] = {
+                            'type': type(error).__name__,
+                            'traceback': self.getTraceback(error),
+                            'code': 500
                         }
 
             try:
                 await websocket.send_json(response)
-                log.debug("IPC Server > %r", response)
+
             except TypeError as error:
                 if str(error).startswith("Object of type") and str(error).endswith(
                     "is not JSON serializable"
