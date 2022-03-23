@@ -91,7 +91,7 @@ class Client:
 
         future = self.loop.create_future()
         self.listeners[_uuid] = (check, future)
-        return asyncio.wait_for(future, timeout)
+        return asyncio.wait_for(future, timeout, loop=self.loop)
     
     async def dispatch(self, data: dict):
         uuid = data.get('uuid')
