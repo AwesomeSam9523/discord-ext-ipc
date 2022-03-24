@@ -162,4 +162,4 @@ class IpcWebsocket():
         recv = await self.get_response(_uuid, asyncio.get_running_loop())
 
         log.debug("Client < %r", recv)
-        return recv
+        return recv['data']
