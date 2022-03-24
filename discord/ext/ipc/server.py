@@ -214,6 +214,7 @@ class Server:
                         }
 
             try:
+                log.info('Sending > %r', response)
                 await websocket.send_json(response)
 
             except TypeError as error:
